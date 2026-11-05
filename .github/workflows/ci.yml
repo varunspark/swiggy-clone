@@ -17,11 +17,14 @@ jobs:
 
       - name: Scan history for leaked secrets
         run: |
-          docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest \
-            detect --source /repo --verbose --redact
+          docker run --rm -v "$PWD":/repo --entrypoint sh zricethezav/gitleaks:latest \
+            -c "git config --global --add safe.directory /repo && gitleaks git /repo --redact -v"
 
   build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -68,6 +71,19 @@ jobs:
           curl -fsS http://localhost:3000/api/restaurants/ | grep -q "Meghana"
           curl -fsS http://localhost:3000/ | grep -q 'id="root"'
           curl -sI http://localhost:3000/static/admin/css/base.css | grep -qi "text/css"
+
+      - name: Log in to GHCR (main branch only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Tag and push tested images (main branch only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          for svc in backend frontend; do
+            docker tag swiggy-$svc:local ghcr.io/$OWNER/swiggy-$svc:${{ github.sha }}
+            docker push ghcr.io/$OWNER/swiggy-$svc:${{ github.sha }}
+          done
 
       - name: Show logs if something failed
         if: failure()
