@@ -7,6 +7,19 @@ on:
     branches: [main]
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan history for leaked secrets
+        run: |
+          docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest \
+            detect --source /repo --verbose --redact
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:
@@ -27,6 +40,15 @@ jobs:
 
       - name: Build images
         run: docker compose build
+
+      - name: Scan images with Trivy (report only for now)
+        run: |
+          for img in swiggy-backend:local swiggy-frontend:local; do
+            echo "=== Scanning $img ==="
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image \
+              --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 "$img"
+          done
 
       - name: Start the stack
         run: docker compose up -d
