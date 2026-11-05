@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create CI env file with throwaway secrets
+        run: |
+          cat > .env <<EOF
+          SECRET_KEY=$(openssl rand -hex 32)
+          DEBUG=False
+          ALLOWED_HOSTS=localhost,127.0.0.1
+          DB_NAME=swiggy
+          DB_USER=swiggy
+          DB_PASSWORD=$(openssl rand -hex 16)
+          DB_PORT=5432
+          EOF
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Start the stack
+        run: docker compose up -d
+
+      - name: Wait for backend to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q backend)")
+            echo "backend: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 5
+          done
+          exit 1
+
+      - name: Smoke tests
+        run: |
+          curl -fsS http://localhost:3000/api/restaurants/ | grep -q "Meghana"
+          curl -fsS http://localhost:3000/ | grep -q 'id="root"'
+          curl -sI http://localhost:3000/static/admin/css/base.css | grep -qi "text/css"
+
+      - name: Show logs if something failed
+        if: failure()
+        run: docker compose logs
+
+      - name: Clean up
+        if: always()
+        run: docker compose down -v
